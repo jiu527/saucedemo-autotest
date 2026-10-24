@@ -1,0 +1,14 @@
+- case: locked_user
+  username: locked_out_user
+  password: secret_sauce
+  expected: "Sorry, this user has been locked out."
+
+- case: empty_username
+  username: ""
+  password: secret_sauce
+  expected: "Username is required"
+
+- case: wrong_password
+  username: standard_user
+  password: wrong_pass
+  expected: "Username and password do not match"

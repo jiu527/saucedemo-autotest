@@ -1,0 +1,54 @@
+name: Selenium Tests CI
+
+# 触发条件：推送到 main 分支、对 main 发起 PR、或手动触发
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. 检出仓库代码
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # 2. 设置 Python 环境
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # 3. 缓存 pip 依赖，加速后续构建（可选但推荐）
+      - name: Cache pip packages
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      # 4. 安装项目依赖
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # 5. 执行测试，并生成 Allure 原始结果
+      - name: Run tests
+        env:
+          CI: "true"  # 你的 driver_factory 中据此启用 headless
+        run: |
+          pytest --alluredir=allure-results --clean-alluredir
+
+      # 6. 上传 Allure 原始结果作为 Artifact（无论测试成败都上传）
+      - name: Upload Allure Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: allure-results
+          path: allure-results/

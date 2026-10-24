@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>wait probe</title></head>
+<body>
+  <div id="always">always here</div>
+  <div id="gone">will be removed</div>
+  <button id="btn" type="button" onclick="document.getElementById('click-result').textContent='clicked'">click me</button>
+  <div id="click-result">not clicked</div>
+  <input id="name-input" value="prefilled">
+  <div id="with-attr" data-state="idle">attr target</div>
+  <div id="hidden" style="display:none">hidden text</div>
+  <script>
+    setTimeout(function () {
+      var late = document.createElement("div");
+      late.id = "late";
+      late.textContent = "late arrival";
+      document.body.appendChild(late);
+    }, 900);
+
+    setTimeout(function () {
+      var gone = document.getElementById("gone");
+      gone.parentNode.removeChild(gone);
+    }, 900);
+
+    setTimeout(function () {
+      for (var i = 0; i < 3; i++) {
+        var item = document.createElement("div");
+        item.className = "item";
+        item.textContent = "item " + i;
+        document.body.appendChild(item);
+      }
+    }, 600);
+  </script>
+</body>
+</html>
