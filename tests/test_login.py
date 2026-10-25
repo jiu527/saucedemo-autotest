@@ -24,7 +24,6 @@ def test_login_success(driver):
 @allure.story('登录失败')
 @allure.title('登录失败测试')
 @pytest.mark.login
-@pytest.mark.xfail 
 @pytest.mark.parametrize("data", load_login_data(), ids=lambda d: d["case"])
 def test_login_failure(driver, data):
     page = LoginPage(driver)

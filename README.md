@@ -1,0 +1,265 @@
+# saucedemo UI 自动化测试
+
+基于 Selenium 4 + pytest + Allure 的 Web UI 自动化项目，被测站点为 [saucedemo.com](https://www.saucedemo.com/)（Sauce Labs 官方演示电商站，托管在 GitHub Pages）。
+
+项目采用 Page Object 模式，并把「显式等待」抽成了一个独立的可自测封装层——这是本项目与常见练手项目最主要的区别：等待逻辑本身也有测试覆盖，而不是散落在各 Page Object 里的魔法 `sleep`。
+
+---
+
+## 目录
+
+- [1. 项目目的与测试范围](#1-项目目的与测试范围)
+- [2. 技术栈](#2-技术栈)
+- [3. 架构分层](#3-架构分层)
+- [4. 本地运行](#4-本地运行)
+- [5. Allure 报告](#5-allure-报告)
+- [6. CI 状态](#6-ci-状态)
+- [7. 调试问题记录](#7-调试问题记录)
+- [8. 已知问题与待办](#8-已知问题与待办)
+
+---
+
+## 1. 项目目的与测试范围
+
+### 目的
+
+1. **验证核心购物链路的正确性**：登录 → 浏览/加购 → 购物车 → 结账，覆盖页面跳转、DOM 渲染、金额计算、状态同步。
+2. **沉淀一套可复用的等待与页面对象基础设施**：用 `WaitUtils` 统一收口所有元素获取，禁止 `time.sleep` 和裸 `find_element`。
+3. **让等待逻辑自身可回归**：`wait_utils` 的第 1、2 层能力有 13 条本地用例守护，用 `file://` 页面确定性触发「延迟出现 / 延迟消失 / 元素被替换」等场景，不依赖外网。
+
+### 覆盖范围
+
+| 模块 | 测试文件 | marker | 用例函数 | 收集条数 | 依赖外网 |
+|---|---|---|---|---|---|
+| 冒烟（站点可达 + 登录表单渲染） | [tests/test_smoke.py](tests/test_smoke.py) | `smoke` | 1 | 1 | ✅ |
+| 登录（成功 + 3 种失败场景） | [tests/test_login.py](tests/test_login.py) | `login` | 2 | 4 | ✅ |
+| 库存页（加购角标、价格排序） | [tests/test_inventory.py](tests/test_inventory.py) | `inventory` | 2 | 2 | ✅ |
+| 购物车（总价核对、移除商品） | [tests/test_cart.py](tests/test_cart.py) | `cart` | 2 | 2 | ✅ |
+| 结账（Overview 商品列表、下单完成） | [tests/test_checkout.py](tests/test_checkout.py) | `checkout` | 2 | 2 | ✅ |
+| 等待封装 · 第 1 层基础等待 | [tests/test_wait_utils.py](tests/test_wait_utils.py) | `wait` | 7 | 7 | ❌ |
+| 等待封装 · 第 2 层交互 | [tests/test_wait_utils.py](tests/test_wait_utils.py) | `action` | 6 | 6 | ❌ |
+| **合计** | | | **22** | **24** | |
+
+> 用例函数 22 个，收集条目 24 条：`test_login_failure` 用 `pytest.mark.parametrize` 展开成 3 条（数据来自 [data/login_data.yaml](data/login_data.yaml)：锁定用户 / 空用户名 / 错误密码）。
+>
+> 其中登录失败的 3 条当前标记为 `@pytest.mark.xfail`，属于「已知预期失败」，详见[第 8 节](#8-已知问题与待办)。
+
+### 明确不在范围内
+
+- 真实支付、下单后的后端数据校验（演示站没有真实后端状态）。
+- 多浏览器/多分辨率矩阵（当前只跑 Chrome，本地最大化窗口、CI 固定 1920×1080）。
+- 移动端、无障碍（a11y）、性能压测。
+- 接口层测试（项目名为 `autotest`，但目前是纯 UI 层）。
+
+---
+
+## 2. 技术栈
+
+| 类别 | 选型 | 版本 | 说明 |
+|---|---|---|---|
+| 语言 | Python | 3.14 | 与 CI 一致 |
+| 浏览器驱动 | Selenium | 4.51.0 | 用 Selenium Manager 自动管理 chromedriver，不手放 `chromedriver.exe` |
+| 测试框架 | pytest | 9.1.1 | `--strict-markers` 开启，marker 必须注册 |
+| 报告 | allure-pytest | 2.16.2 | 原始结果写 `allure-results/` |
+| 测试数据 | PyYAML | 6.0.3 | 登录失败用例参数化 |
+| 运行环境 | venv | — | 虚拟环境位于 `./autotest/`（注意与项目根目录同名，是历史原因） |
+| CI | GitHub Actions | ubuntu-latest | 见 [.github/workflows/test.yaml](.github/workflows/test.yaml) |
+
+完整依赖见 [requirements.txt](requirements.txt)（26 个包，含传递依赖，已全量钉版本）。
+
+---
+
+## 3. 架构分层
+
+```
+tests/                      ← 第 4 层：用例层，只写业务断言
+  test_smoke.py                smoke
+  test_login.py                login（数据驱动）
+  test_inventory.py            inventory
+  test_cart.py                 cart
+  test_checkout.py             checkout
+  test_wait_utils.py           wait / action（基础设施自测，走 file://）
+  data/wait_probe.html         本地测试页面
+        ↓ 只调用页面对象方法，不碰 driver
+pages/                      ← 第 3 层：Page Object，封装页面结构与操作
+  base_page.py                 持有 WaitUtils，提供 open/click/type/get_text
+  login_page.py                登录页
+  inventory_page.py            库存页（加购、排序、取价格）
+  cart_page.py                 购物车页（移除、结算入口）
+  checkout_page.py             结账两步 + 完成页
+        ↓ 全部元素操作必须经过 WaitUtils
+utils/
+  wait_utils.py              ← 第 2 层：显式等待封装（第 1 层基础等待 + 第 2 层交互）
+  driver_factory.py          ← 第 1 层：浏览器工厂（代理策略、headless、IPv6 固定）
+        ↓
+conftest.py                 ← 夹具与钩子：driver / wait fixture、失败自动截图
+pytest.ini                  ← marker 注册、allure 参数、testpaths
+data/login_data.yaml        ← 外部测试数据
+```
+
+### 各层职责与约束
+
+**第 1 层 · 浏览器工厂** —— [utils/driver_factory.py](utils/driver_factory.py)
+
+唯一创建 driver 的地方，集中处理所有环境相关的浏览器配置，避免环境差异渗进用例：
+
+- 默认 `--no-proxy-server`，强制直连（除非显式设 `USE_SYSTEM_PROXY=1`）；
+- 检测到 `CI` 环境变量时切 `--headless=new` 并关沙箱；
+- 本地把 `www.saucedemo.com` 的 DNS 固定到 IPv6 地址；
+- `implicitly_wait(0)`，关掉隐式等待，避免与显式等待叠加出双重超时。
+
+**第 2 层 · 等待封装** —— [utils/wait_utils.py](utils/wait_utils.py)
+
+全项目唯一的元素获取入口，硬约定：**不用 `driver.find_element`、不直接 `WebDriverWait`、不用 `time.sleep`**。
+
+- 第 1 层（查询）：`visible` / `present` / `clickable` / `invisible` / `all_visible` / `present_all` / `until_url_contains`
+- 第 2 层（交互）：`click` / `type_text` / `text_of` / `attr_of`，内部带 stale 元素重新定位重试
+- 超时统一抛 `WaitTimeoutError`，消息里带 locator、超时值、页面标题、当前 URL——失败时不用再猜是哪一步挂的
+- 超时/轮询/重试次数可由 `WAIT_TIMEOUT` / `WAIT_POLL` / `WAIT_STALE_RETRIES` 覆盖，无需改代码
+
+**第 3 层 · Page Object** —— `pages/`
+
+一个页面一个类，只暴露业务语义方法（`login()`、`add_to_cart(name)`、`sort_by_price_low_high()`），locator 以类常量声明在类顶部。定位串统一用 `("id", "user-name")` 这种元组形式，与 Selenium 的 `By` 语义等价。
+
+**第 4 层 · 用例层** —— `tests/`
+
+只做三件事：调用页面对象、断言、挂 Allure 元数据（`epic` / `feature` / `story` / `title`）。跨用例的重复前置（已登录、已加购、已走到结账第一步）抽成各测试文件内的 `@pytest.fixture`，而不是互相 import 用例。
+
+**横向支撑**
+
+- [conftest.py](conftest.py)：`driver` fixture 负责创建/退出，`wait` fixture 注入 `WaitUtils`；`pytest_runtest_makereport` 钩子在 `call` 阶段失败时自动截图并附到 Allure。
+- [pytest.ini](pytest.ini)：注册 7 个 marker（`--strict-markers` 下拼错会直接报错）、`testpaths = tests`、默认带 `--alluredir` 和 `--clean-alluredir`。
+
+---
+
+## 4. 本地运行
+
+### 前置条件
+
+- Windows + PowerShell（仓库自带 [run_tests.ps1](run_tests.ps1) 是 PowerShell 脚本）
+- 本机装 Chrome
+- 已创建虚拟环境 `./autotest/`（`python -m venv autotest`）并装好依赖
+
+```powershell
+# 首次准备
+python -m venv autotest
+.\autotest\Scripts\python.exe -m pip install -r requirements.txt
+```
+
+### 跑测试
+
+| 场景 | 命令 |
+|---|---|
+| 全部用例 | `.\run_tests.ps1` |
+| 只跑冒烟 | `.\run_tests.ps1 -m smoke` |
+| 只跑本地等待自测（不联网，最快） | `.\run_tests.ps1 -m wait -m action` |
+| 只跑某个模块 | `.\run_tests.ps1 -m login` |
+| 指定用例 | `.\run_tests.ps1 tests/test_cart.py::test_cart_total` |
+| 关键字过滤 | `.\run_tests.ps1 -k "badge or sort"` |
+| 只收集不执行（看用例清单） | `.\run_tests.ps1 --collect-only -q` |
+
+`run_tests.ps1` 只是个很薄的包装：定位 venv 里的 `python.exe`、设好 `SE_OFFLINE=true`、把 `@args` 原样透传给 `pytest`，最后用 `$LASTEXITCODE` 透传退出码。直接调 `.\autotest\Scripts\python.exe -m pytest` 效果相同。
+
+### 环境变量
+
+| 变量 | 默认 | 作用 |
+|---|---|---|
+| `CI` | 未设 | 设了即切 headless + 固定窗口 + 跳过最大化 |
+| `SE_OFFLINE` | 由 `run_tests.ps1` 设为 `true` | 让 Selenium Manager 只读本地驱动缓存、不联网校验 |
+| `USE_SYSTEM_PROXY` | 未设 | 设为 `1` 时不做直连，改走系统代理 |
+| `WAIT_TIMEOUT` | `10` | 显式等待默认超时（秒） |
+| `WAIT_POLL` | `0.5` | 轮询间隔（秒） |
+| `WAIT_STALE_RETRIES` | `2` | stale 元素重新定位的最大尝试次数 |
+
+> `WAIT_STALE_RETRIES` 是**总尝试次数**而非「额外重试次数」，所以单次交互的最坏耗时是 `retries × timeout`（默认 2 × 10s = 20s）。
+
+---
+
+## 5. Allure 报告
+
+`pytest.ini` 的 `addopts` 已默认带 `--alluredir=allure-results --clean-alluredir`，所以每次跑都会重新生成原始结果（注意：会清空上一次的结果）。
+
+```powershell
+# 实时起服务预览（需要装 allure 命令行，或从 Allure 官方 release 解压后加进 PATH）
+allure serve allure-results
+
+# 或生成为静态站点
+allure generate allure-results -o report --clean
+allure open report
+```
+
+仓库里已有一份生成的静态报告在 [report/](report/index.html)，可直接用浏览器打开。失败用例会自动附带全页截图（见 `conftest.py` 的钩子）。
+
+---
+
+## 6. CI 状态
+
+### 工作流
+
+[.github/workflows/test.yaml](.github/workflows/test.yaml)，名称 `Selenium Tests CI`，跑在 `ubuntu-latest`。
+
+| 项 | 配置 |
+|---|---|
+| 触发条件 | push 到 `main`、对 `main` 的 PR、手动 `workflow_dispatch` |
+| Python | 3.14（`actions/setup-python@v5`） |
+| 依赖缓存 | 缓存 `~/.cache/pip`，key 取 `requirements.txt` 的哈希 |
+| 执行 | `pytest --alluredir=allure-results --clean-alluredir`，并设 `CI=true` 触发 headless |
+| 产物 | `if: always()` 上传 `allure-results/` 为 artifact（用例挂了也能拿到结果） |
+
+### 本地与 CI 的行为差异
+
+| 行为 | 本地 | CI |
+|---|---|---|
+| 浏览器形态 | 有界面，最大化窗口 | `--headless=new`，1920×1080 |
+| 代理 | 强制直连 | 强制直连（Actions 本来也没代理） |
+| IPv6 固定 | 生效 | **不生效**（GitHub Actions 无 IPv6 出口，钉了会全挂） |
+| `SE_OFFLINE` | `true`（由脚本设） | 未设，靠 Actions 正常联网下载 chromedriver |
+| 报告 | 本地 `allure serve` | 只上传 artifact，不部署 GitHub Pages |
+
+---
+
+## 7. 调试问题记录
+
+### 问题一：外网用例偶发慢到 90s+，最差直接超时
+
+**症状**：冒烟用例平时 1s 左右，但会周期性出现 92s、120s+ 的极端耗时，且没有固定规律。
+
+**排查**：
+
+1. 拆解耗时，发现时间不是花在等待元素上，而是卡在 `driver.get()` 建连阶段。
+2. 发现两件事叠加：
+   - 本机开着系统代理，Chrome 默认读系统代理，saucedemo 走代理实测 16.7s（直连 1.1s），最差超过 120s 直接超时；
+   - saucedemo 托管在 GitHub Pages，其 IPv4（`185.199.x.x`）在国内时断时续，而 IPv6（`2606:50c0::`）稳定。Chrome 会在多个地址间轮询，每踩中一个被丢的 IPv4 连接就要等约 21s TCP 超时——这才是 92s 这种数字的来源（几个坏地址叠加）。
+
+**修复**：
+
+- [driver_factory.py](utils/driver_factory.py) 加 `--no-proxy-server` 强制直连（留 `USE_SYSTEM_PROXY=1` 逃生口）；
+- 本地加 `--host-resolver-rules=MAP www.saucedemo.com [2606:50c0:8000::153]` 固定走 IPv6，且仅在非 CI 生效。
+
+**两个关键细节**（都是踩过的坑）：
+
+- **走代理时 `--host-resolver-rules` 会静默失效**。DNS 由代理端解析，本地 MAP 规则被直接跳过、不报错。所以「强制直连」和「固定 IPv6」必须同时存在，缺一个另一个就白搭。
+- **IPv6 字面量必须带方括号**。写成 `MAP www.saucedemo.com 2606:50c0:8000::153` 不会报错，但会静默失效并报 `ERR_NAME_NOT_RESOLVED`。
+
+**结果**：冒烟稳定在 1s 量级。
+
+### 问题二：每天/每小时「第一次跑」莫名慢约 70 秒
+
+**症状**：连续跑几次都很快，但隔一段时间后的第一次执行总要干等约 70s 才开始。
+
+**排查**：慢的是 `webdriver.Chrome()` 构造，不是用例本身。Selenium Manager 会为 chromedriver 缓存条目记录 1 小时有效期，过期后它会直连 `googlechromelabs.github.io` 重新核对版本；该域名在国内不可达，于是先干等 TCP 超时（约 70s），才回退到本地缓存继续跑。
+
+**修复**：[run_tests.ps1](run_tests.ps1#L13) 里设 `$env:SE_OFFLINE = "true"`，让 Selenium Manager 只用本地缓存、永不联网。
+
+**代价与配套**：Chrome 大版本升级后本地缓存版本对不上时，这个开关会导致启动失败。此时需要临时注释掉 `SE_OFFLINE`、手动导出 `HTTPS_PROXY` 跑一次让它重新下载驱动，再把两处改回来——这套操作已经写进脚本注释，避免下次重新排查一遍。
+
+### 问题三：断言「购物车为空」时卡满 10 秒超时
+
+**症状**：`test_remove_item_empties_cart` 里两次移除商品后断言列表为空，逻辑正确但要白等到超时；空购物车场景下方法直接抛 `WaitTimeoutError` 而不是返回 `[]`。
+
+**排查**：最初用 `wait.present_all(ITEM_NAME)` 取商品名列表，但 `presence_of_all_elements_located` 在匹配到 **0 个**元素时返回空列表，而 `WebDriverWait.until()` 把 falsy 返回值当作「条件未满足」，于是继续轮询直到超时。也就是说：**「等待至少一个元素出现」这个语义，天生无法表达「等待元素全部消失」**。
+
+**修复**：[cart_page.py](pages/cart_page.py#L18-L33) 改成先等容器 `#cart_contents_container` 出现（它始终存在），再用 `driver.find_elements` 直接收集——空列表是合法返回值，不再等价于「还没等到」。文件里保留了另一种写法（1s 短超时探测 + 捕获 `WaitTimeoutError` 返回 `[]`）的注释，作为备选方案记录。
+
+**延伸结论**：`present_all` 适合「至少一个」的场景，判断「全部消失」应使用 `invisible`（逐元素）或先确认容器存在再取列表。
+
