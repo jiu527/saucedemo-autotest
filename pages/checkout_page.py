@@ -19,7 +19,7 @@ class CheckoutPage(BasePage):
         super().open(self.URL)
 
     def fill_info(self, first, last, zip):
-        """填写收货信息三件套（字段 id 用连字符，不是下划线）。"""
+        """填写收货信息"""
         self.type(self.FIRST_NAME, first)
         self.type(self.LAST_NAME, last)
         self.type(self.POSTAL_CODE, zip)
@@ -29,7 +29,7 @@ class CheckoutPage(BasePage):
         self.wait.click(self.CONTINUE_BTN)
 
     def get_subtotal(self):
-        """返回页面展示的 Item total（不含税小计），如 "Item total: $39.98" -> 39.98。"""
+        """返回页面展示的 Item total"""
         return float(self.get_text(self.SUBTOTAL).split("$")[-1])
 
     def get_item_names(self):

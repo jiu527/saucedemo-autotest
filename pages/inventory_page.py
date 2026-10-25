@@ -39,6 +39,6 @@ class InventoryPage(BasePage):
         select.select_by_value("lohi")
 
     def get_prices(self):
-        """等待商品列表渲染后返回所有标价（升序与否由调用方断言）。"""
+        """等待商品列表渲染后返回所有标价"""
         items = self.wait.all_visible(self.ITEM_PRICE)
         return [float(el.text.removeprefix("$")) for el in items]

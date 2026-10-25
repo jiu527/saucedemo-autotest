@@ -12,7 +12,7 @@ ITEM_B = "Sauce Labs Bike Light"
 
 @pytest.fixture
 def checkout_page(driver):
-    """已加两件商品并走到结账第一步（填写信息页）的页面对象。"""
+    """两件商品并走到结账第一步（填写信息页）"""
     page = LoginPage(driver)
     page.open()
     page.login("standard_user", "secret_sauce")
@@ -33,7 +33,6 @@ def checkout_page(driver):
 def test_overview_lists_added_items(checkout_page):
     checkout_page.fill_info("Test", "User", "10000")
     checkout_page.continue_to_overview()
-    # 预期值来自测试实际添加的商品，不写死页面内容
     assert sorted(checkout_page.get_item_names()) == sorted([ITEM_A, ITEM_B])
 
 
@@ -47,5 +46,4 @@ def test_checkout_complete_order(checkout_page, driver):
     checkout_page.continue_to_overview()
     checkout_page.finish()
     assert "checkout-complete" in driver.current_url
-    # 确认文案是站点不变量，属于可以写死的少数例外
     assert checkout_page.get_complete_header() == "Thank you for your order!"

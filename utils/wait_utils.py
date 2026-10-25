@@ -1,13 +1,13 @@
 """统一的显式等待封装。
 
-约定：所有元素获取都必须经过本模块。测试与 Page Object 里不要出现
-driver.find_element / find_elements，也不要直接构造 WebDriverWait，
-更不要用 time.sleep。
+约定：所有元素获取都必须经过本模块。测试与 Page Object 里不用
+driver.find_element / find_elements，也不直接构造 WebDriverWait，
+更不用 time.sleep。
 
-locator 统一写成 (By.X, "value") 元组，例如 (By.ID, "user-name")。
+locator 统一为 (By.X, "value") 元组，例如 (By.ID, "user-name")。
 
 超时、轮询间隔与 stale 重试次数在导入时从环境变量 WAIT_TIMEOUT /
-WAIT_POLL / WAIT_STALE_RETRIES 读取，也可以在构造 Wait 时显式传入覆盖。
+WAIT_POLL / WAIT_STALE_RETRIES 读取，或者在构造 Wait 时显式传入覆盖。
 """
 
 import os
@@ -24,7 +24,7 @@ DEFAULT_TIMEOUT = float(os.getenv("WAIT_TIMEOUT", "10"))
 DEFAULT_POLL = float(os.getenv("WAIT_POLL", "0.5"))
 DEFAULT_STALE_RETRIES = int(os.getenv("WAIT_STALE_RETRIES", "2"))
 
-# Selenium 自带的默认忽略项只有 NoSuchElementException（wait.py:27），
+# Selenium 自带的默认忽略项只有 NoSuchElementException，
 # 传入的值是"追加"而不是覆盖。页面重渲染时元素会在轮询期间失效，
 # 不追加 StaleElementReferenceException 的话等待会被提前打断而不是继续重试。
 IGNORED_EXCEPTIONS = (StaleElementReferenceException,)
@@ -115,7 +115,7 @@ class WaitUtils:
     def clickable(self, locator, timeout=None):
         """等待元素可见且可点击，返回该元素。
 
-        注意：只判断可见与启用，不判断是否被别的元素遮挡，
+        只判断可见与启用，不判断是否被别的元素遮挡，
         被遮挡时会一直等到超时。
         """
         return self._until(

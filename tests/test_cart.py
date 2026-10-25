@@ -12,7 +12,6 @@ ITEM_B = "Sauce Labs Bike Light"  # 9.99
 
 @pytest.fixture
 def cart_page(driver):
-    """已加两件商品并打开购物车页的页面对象。"""
     page = LoginPage(driver)
     page.open()
     page.login("standard_user", "secret_sauce")
@@ -35,7 +34,6 @@ def test_cart_total(cart_page, driver):
     checkout = CheckoutPage(driver)
     checkout.fill_info("Test", "User", "10000")
     checkout.continue_to_overview()
-    # 预期值不写死：拿结账页自己展示的 Item total 对账
     assert sum(prices) == pytest.approx(checkout.get_subtotal())
 
 

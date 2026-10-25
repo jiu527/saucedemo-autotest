@@ -4,9 +4,12 @@ from selenium.webdriver.chrome.options import Options
 
 def create_driver():
     options = Options()
-    # 系统代理只在下载 chromedriver 时用得上；被测站点走代理反而慢得多
-    # （saucedemo.com 实测：直连 1.1s，走代理 16.7s，最差超过 120s 直接超时）
-    options.add_argument("--proxy-server=direct://")
+    # 被测站点必须直连：走系统代理实测慢 15 倍
+    # （saucedemo.com 直连 1.1s，走代理 16.7s，最差超过 120s 直接超时），
+    # 而且走代理时 DNS 由代理端解析，下面的 --host-resolver-rules 会静默失效。
+    # 仅当所在网络只能经代理出网时，临时设 USE_SYSTEM_PROXY=1 放行。
+    if os.getenv("USE_SYSTEM_PROXY") != "1":
+        options.add_argument("--no-proxy-server")
     if os.getenv("CI"):
         options.add_argument("--headless=new")
         options.add_argument("--no-sandbox")

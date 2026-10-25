@@ -1,12 +1,11 @@
 """wait_utils 的自测（第 1 层基础等待 + 第 2 层交互）。
 
 用本地 HTML 制造"元素延迟出现 / 延迟消失 / 元素被替换"，不依赖外网，
-也不受代理影响。其中两条是关键：
+也不受代理影响。
 
 - test_visible_actually_waits 断言等待确实在轮询，实现退化成"查一次就返回"会失败
 - test_click_retries_after_stale 确定性地触发 stale，重试逻辑失效会失败
 
-标记：wait = 第 1 层基础等待；action = 第 2 层交互。选择方式见 pytest.ini。
 """
 
 import time
