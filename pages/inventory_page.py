@@ -24,14 +24,10 @@ class InventoryPage(BasePage):
         return int(self.get_text(self.CART_BADGE))
 
     def add_to_cart(self, name):
-        """把商品加入购物车，返回添加后的角标数字。
-
-        商品名转 slug 与 data-test 属性对应：Sauce Labs Backpack ->
-        add-to-cart-sauce-labs-backpack。
-        """
         slug = name.lower().replace(" ", "-")
-        self.click(("css selector", f"[data-test='add-to-cart-{slug}']"))
-        return int(self.get_text(self.CART_BADGE))
+        self.wait.click(("css selector", f"[data-test='add-to-cart-{slug}']"))
+        self.wait.visible(("css selector", f"[data-test='remove-{slug}']"))
+        return self.get_cart_count()
 
     def sort_by_price_low_high(self):
         """在下拉框中选中 Price (low to high)。"""

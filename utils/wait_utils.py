@@ -98,6 +98,14 @@ class WaitUtils:
                 last_error = exc
         raise last_error
 
+    def until_url_contains(self, fragment, timeout=None):
+        return self._until(
+            ("url", fragment),
+            EC.url_contains(fragment),
+            f"URL 包含 {fragment!r}",
+            timeout,
+        )
+
     # --- 第 1 层：基础等待 ---
 
     def visible(self, locator, timeout=None):

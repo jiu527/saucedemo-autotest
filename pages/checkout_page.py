@@ -27,6 +27,7 @@ class CheckoutPage(BasePage):
     def continue_to_overview(self):
         """提交第一步信息，进入 Checkout: Overview（第二步）。"""
         self.wait.click(self.CONTINUE_BTN)
+        self.wait.until_url_contains("checkout-step-two.html")
 
     def get_subtotal(self):
         """返回页面展示的 Item total"""
@@ -40,6 +41,7 @@ class CheckoutPage(BasePage):
     def finish(self):
         """在 Overview 页点击 Finish，跳转完成页。"""
         self.click(self.FINISH_BTN)
+        self.wait.until_url_contains("checkout-complete")
 
     def get_complete_header(self):
         return self.get_text(self.COMPLETE_HEADER)

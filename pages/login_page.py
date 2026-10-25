@@ -13,6 +13,7 @@ class LoginPage(BasePage):
         self.type(self.USERNAME, username)
         self.type(self.PASSWORD, password)
         self.click(self.LOGIN_BTN)
+        self.wait.until_url_contains("inventory.html")
 
     def get_error_message(self):
         return self.get_text(self.ERROR_MSG)
