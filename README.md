@@ -42,7 +42,7 @@
 
 > 用例函数 22 个，收集条目 24 条：`test_login_failure` 用 `pytest.mark.parametrize` 展开成 3 条（数据来自 [data/login_data.yaml](data/login_data.yaml)：锁定用户 / 空用户名 / 错误密码）。
 >
-> 其中登录失败的 3 条当前标记为 `@pytest.mark.xfail`，属于「已知预期失败」，详见[第 8 节](#8-已知问题与待办)。
+> 其中登录失败的 3 条曾因用例设计缺陷稳定失败，已按[第 8 节](#8-已知问题与待办)的 P0 条目修复（运行时复跑仍待在普通终端确认）。
 
 ### 明确不在范围内
 
@@ -262,4 +262,71 @@ allure open report
 **修复**：[cart_page.py](pages/cart_page.py#L18-L33) 改成先等容器 `#cart_contents_container` 出现（它始终存在），再用 `driver.find_elements` 直接收集——空列表是合法返回值，不再等价于「还没等到」。文件里保留了另一种写法（1s 短超时探测 + 捕获 `WaitTimeoutError` 返回 `[]`）的注释，作为备选方案记录。
 
 **延伸结论**：`present_all` 适合「至少一个」的场景，判断「全部消失」应使用 `invisible`（逐元素）或先确认容器存在再取列表。
+
+---
+
+## 8. 已知问题与待办
+
+### 本次实测结果
+
+| 运行 | 命令要点 | 结果 |
+|---|---|---|
+| 本地等待自测 | `pytest tests/test_wait_utils.py`，`CI=true`（headless）+ `-o addopts=""` | **13 passed**，46.4s |
+| 冒烟 | `pytest tests/test_smoke.py`，不设 `CI`（真实窗口 + IPv6 固定） | **1 passed**，4.7s（call 阶段 2.1s） |
+| 其余外网用例 | `pytest` 登录/库存/购物车/结账 4 个文件 | **4 failed, 6 passed**，425.5s |
+
+### P0（已修复）：登录失败用例必然失败，断言根本没执行
+
+`LoginPage.login()` 点完登录按钮后无条件执行 `until_url_contains("inventory.html")`（[login_page.py](pages/login_page.py#L16)）。失败场景的 URL 永远停在 `https://www.saucedemo.com/`，于是 3 条失败用例都在 10s 后抛 `WaitTimeoutError`，`assert data["expected"] in get_error_message()` 一行都没跑到。实测报错原文：
+
+```
+WaitTimeoutError: 等待超时（10.0s）：期望「URL 包含 'inventory.html'」
+  locator: url = 'inventory.html'
+  页面标题: Swag Labs
+  当前 URL: https://www.saucedemo.com/
+```
+
+修复（已实施）：把 `login()` 拆成两步——`submit_credentials()` 只填充并点击、不判断跳转；`login()` 在此基础上再断言 `until_url_contains("inventory.html")`，失败用例改用 `submit_credentials()` + 等待错误提示可见，并补一条「URL 没有变成 inventory.html」的断言。正负两条路径各用各的等待条件。
+
+**验证状态**：改动后 `pytest --collect-only` 收集到 24 条、导入全部正常；但运行时复跑被环境阻断（Chrome 无法启动，见本节末尾），3 条失败用例是否转绿尚未实测。
+
+### P1：`test_login_success` 出现过一次 120s 挂起
+
+`driver.get("https://www.saucedemo.com/")` 卡在 chromedriver 的 read timeout（`read timeout=120`），而同批后面的库存/购物车/结账用例（同样要登录）全部通过；同配置下单跑冒烟只用 2.1s。怀疑与本地钉死 IPv6 的 `--host-resolver-rules` 有关：钉成单一地址后失去多地址回退，IPv6 路径一抖就整体挂住。待复现确认，排障时可去掉 MAP 规则或用 `USE_SYSTEM_PROXY=1` 做对照实验。
+
+### P2：其它待办
+
+- **每条用例都新建一次 driver**，整套跑下来偏慢（10 条外网 425s，其中约 120s 是上面那次挂起）。若调用频繁，可考虑 driver 提到 session 级 fixture + 用例间 `delete_all_cookies()`，代价是页面状态残留风险上升。
+- 仓库根目录有 3 个临时脚本：`_marker_count.ps1`（统计各 marker 用例数，可留）、`_net_probe.ps1` 和 `_timing_probe.ps1`（均为 0 字节空文件、无任何引用，可删）。
+- `allure-results/`、`report/` 已在 [.gitignore](.gitignore) 中忽略，但本地会持续累积。
+- CI 只上传 artifact，不产出可直接访问的报告站点；如需可访问，可加 `allure generate` + GitHub Pages 发布。
+- `CartPage.get_item_names` 仍直接调用 `driver.find_elements`，与「元素获取全部经 WaitUtils」的约定有出入（问题三的权衡结果）。
+
+### 自动化验证的两个环境障碍（与项目代码无关）
+
+**其一：命令沙箱拿到 `WRITE_DAC` 失败。** 默认 `workspace-write` 沙箱下任何命令都会在启动前失败：
+
+```
+SetNamedSecurityInfoW failed (Win32 5): grantWrite(D:\Code\Python\autotest)
+```
+
+该目录 Owner 就是当前用户、`Authenticated Users` 也有 `Modify`，但进程拿不到改 DACL 的权限（仅 `BUILTIN\Administrators` 显式持有）——所以「能写文件」却「改不了 ACL」。给该目录补一条显式 ACE 后此问题消失。
+
+**其二：受限会话里 Chrome 起不来。** 症状是**所有**用例都挂在 `driver` fixture 的 `create_driver()`，与用例代码无关：
+
+```
+SessionNotCreatedException: session not created: Chrome failed to start: crashed.
+  (session not created: DevToolsActivePort file doesn't exist)
+```
+
+绕过 pytest 直接命令行启动 Chrome 可以定位到根因：
+
+```
+chrome.exe --headless=new --user-data-dir=... --dump-dom about:blank
+[ERROR:crashpad_client_win.cc:430] OpenProcess: 拒绝访问。 (0x5)
+[ERROR:crashpad_client_win.cc:144] crash server failed to launch, self-terminating
+[FATAL:mojo\public\cpp\platform\platform_channel.cc:112] Check failed: . : 拒绝访问。 (0x5)
+```
+
+即 Chrome 的崩溃上报进程和 Mojo IPC 命名通道都被拒绝，浏览器自身无法启动，`--no-sandbox` 与 `--disable-breakpad` 均无效。结论：**UI 用例必须在普通终端（或 CI）里执行**，受限的自动化会话只能做收集、静态检查这类不启动浏览器的工作。
 

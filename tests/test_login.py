@@ -28,5 +28,7 @@ def test_login_success(driver):
 def test_login_failure(driver, data):
     page = LoginPage(driver)
     page.open()
-    page.login(data["username"], data["password"])
+    # 预期失败：只提交、不等跳转，否则会一直等 inventory.html 直到超时
+    page.submit_credentials(data["username"], data["password"])
     assert data["expected"] in page.get_error_message()
+    assert "inventory.html" not in driver.current_url
