@@ -1,8 +1,8 @@
 from selenium.common.exceptions import WebDriverException
-from utils.wait_utils import WaitTimeoutError
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support import expected_conditions as EC
+
 from pages.base_page import BasePage
+from utils.wait_utils import WaitTimeoutError
+
 
 class CartPage(BasePage):
     CONTAINER = ("id", "cart_contents_container")
@@ -17,21 +17,14 @@ class CartPage(BasePage):
         super().open(self.URL)
 
     def get_item_names(self):
-        
-        self.wait.present(self.CONTAINER)          # #cart_contents_container 始终存在
-        items = self.driver.find_elements(*self.ITEM_NAME)
-        return [el.text for el in items]
-        # """返回购物车里所有商品名；空购物车返回 []。
-    
-        # 空购物车没有任何 .cart_item，而 present_all 要等到至少一个元素
-        # 出现才返回（空列表在 until() 里被当成"还没等到"，会一直轮询），
-        # 所以用 1 秒短超时探测：等不到就按空购物车处理。
-        # """
-        # try:
-        #     items = self.wait.present_all(self.ITEM_NAME, timeout=1)
-        # except WaitTimeoutError:
-        #     return []
-        # return [el.text for el in items]
+        """返回购物车里所有商品名；空购物车返回 []。
+
+        空购物车没有任何 `.cart_item`，而 `present_all` 的语义是「等到至少
+        一个出现」——空列表会被当成条件不满足而一直轮询到超时。所以这里先
+        等始终存在的容器出现，再用 `elements_now` 取当前列表（允许为空）。
+        """
+        self.wait.present(self.CONTAINER)
+        return [element.text for element in self.wait.elements_now(self.ITEM_NAME)]
 
     def get_prices(self):
         """返回购物车里所有商品标价（float，不含 $）。"""

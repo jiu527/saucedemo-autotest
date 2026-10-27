@@ -63,6 +63,20 @@ def test_present_all(driver, wait):
 
 
 @pytest.mark.wait
+def test_elements_now_allows_empty(driver, wait):
+    """elements_now 不等待、允许返回空列表——这是 present_all 做不到的语义。
+
+    页面里的 .item 是 setTimeout 后创建的（延迟约 900ms），所以必须先等渲染
+    到位再取；而 `.no-such-item` 无论何时都应返回 []，而不是像 present_all
+    那样一直轮询到超时。这两点合起来正好描述了「购物车为空」这个真实场景。
+    """
+    driver.get(PAGE)
+    wait.present_all((By.CSS_SELECTOR, ".item"))          # 先等页面渲染到位
+    assert len(wait.elements_now((By.CSS_SELECTOR, ".item"))) == 3
+    assert wait.elements_now((By.CSS_SELECTOR, ".no-such-item")) == []
+
+
+@pytest.mark.wait
 def test_timeout_raises_with_context(driver, wait):
     driver.get(PAGE)
     with pytest.raises(WaitTimeoutError) as excinfo:

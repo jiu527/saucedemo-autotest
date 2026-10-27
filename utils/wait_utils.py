@@ -157,6 +157,19 @@ class WaitUtils:
             timeout,
         )
 
+    def elements_now(self, locator):
+        """立即返回当前匹配的所有元素，**允许空列表、不等待**。
+
+        用于「元素数量本身就是断言目标」的场景，典型例子是购物车为空时的
+        `get_item_names()` 必须返回 `[]`：`present_all` 的语义是「等到至少
+        一个出现」，空列表会被当作条件不满足而一直轮询到超时，无法表达
+        「一个都没有」。所以这种场景要先等某个稳定容器出现（`present`），
+        再用本方法直接取当前列表。
+
+        注意：本方法不做任何等待，调用者要自己保证页面已渲染到位。
+        """
+        return self.driver.find_elements(*locator)
+
     # --- 第 2 层：交互 ---
 
     def click(self, locator, timeout=None):

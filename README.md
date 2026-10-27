@@ -112,10 +112,11 @@ data/login_data.yaml        ← 外部测试数据
 
 全项目唯一的元素获取入口，硬约定：**不用 `driver.find_element`、不直接 `WebDriverWait`、不用 `time.sleep`**。
 
-- 第 1 层（查询）：`visible` / `present` / `clickable` / `invisible` / `all_visible` / `present_all` / `until_url_contains`
+- 第 1 层（查询）：`visible` / `present` / `clickable` / `invisible` / `all_visible` / `present_all` / `elements_now` / `until_url_contains`
 - 第 2 层（交互）：`click` / `type_text` / `text_of` / `attr_of`，内部带 stale 元素重新定位重试
 - 超时统一抛 `WaitTimeoutError`，消息里带 locator、超时值、页面标题、当前 URL——失败时不用再猜是哪一步挂的
 - 超时/轮询/重试次数可由 `WAIT_TIMEOUT` / `WAIT_POLL` / `WAIT_STALE_RETRIES` 覆盖，无需改代码
+- `elements_now` 是唯一「不等待、允许返回空列表」的查询方法，专门服务「数量本身就是断言目标」的场景（如断言购物车为空）；其余方法都等到条件成立才返回
 
 **第 3 层 · Page Object** —— `pages/`
 
@@ -280,9 +281,12 @@ allure open report
 
 **排查**：最初用 `wait.present_all(ITEM_NAME)` 取商品名列表，但 `presence_of_all_elements_located` 在匹配到 **0 个**元素时返回空列表，而 `WebDriverWait.until()` 把 falsy 返回值当作「条件未满足」，于是继续轮询直到超时。也就是说：**「等待至少一个元素出现」这个语义，天生无法表达「等待元素全部消失」**。
 
-**修复**：[cart_page.py](pages/cart_page.py#L18-L33) 改成先等容器 `#cart_contents_container` 出现（它始终存在），再用 `driver.find_elements` 直接收集——空列表是合法返回值，不再等价于「还没等到」。文件里保留了另一种写法（1s 短超时探测 + 捕获 `WaitTimeoutError` 返回 `[]`）的注释，作为备选方案记录。
+**修复**：分两层解决，保证不破坏「所有元素获取都走 WaitUtils」的约定：
 
-**延伸结论**：`present_all` 适合「至少一个」的场景，判断「全部消失」应使用 `invisible`（逐元素）或先确认容器存在再取列表。
+1. [wait_utils.py](utils/wait_utils.py) 新增 `elements_now(locator)`——**不等待、允许返回空列表**的查询方法，内部执行 `driver.find_elements`（这正是封装层该做的事）；
+2. [cart_page.py](pages/cart_page.py) 的 `get_item_names()` 改成「先 `present(CONTAINER)` 等始终存在的容器出现，再 `elements_now(ITEM_NAME)` 取列表」——空列表是合法返回值，不再等价于「还没等到」。
+
+**延伸结论**：`present_all` 适合「至少一个」的场景；判断「全部消失」用 `invisible`（逐元素）或「先等容器 + `elements_now`」。这条也是 `elements_now` 存在的唯一理由。
 
 ---
 
@@ -334,10 +338,10 @@ WaitTimeoutError: 等待超时（10.0s）：期望「URL 包含 'inventory.html'
 ### P2：其它待办
 
 - **每条用例都新建一次 driver**，整套跑下来偏慢（10 条外网 425s，其中约 120s 是上面那次挂起）。若调用频繁，可考虑 driver 提到 session 级 fixture + 用例间 `delete_all_cookies()`，代价是页面状态残留风险上升。
-- 仓库根目录有 3 个临时脚本：`_marker_count.ps1`（统计各 marker 用例数，可留）、`_net_probe.ps1` 和 `_timing_probe.ps1`（均为 0 字节空文件、无任何引用，可删）。
 - `allure-results/`、`report/` 已在 [.gitignore](.gitignore) 中忽略，但本地会持续累积。
 - CI 只上传 artifact，不产出可直接访问的报告站点；如需可访问，可加 `allure generate` + GitHub Pages 发布。
-- `CartPage.get_item_names` 仍直接调用 `driver.find_elements`，与「元素获取全部经 WaitUtils」的约定有出入（问题三的权衡结果）。
+
+> 已完成：`CartPage.get_item_names` 曾直接调用 `driver.find_elements`，现已改走新增的 `WaitUtils.elements_now()`，Page 层不再出现裸 `find_element(s)`（`grep pages/*.py` 为空）。
 
 ### 自动化验证的两个环境障碍（与项目代码无关）
 
