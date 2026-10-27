@@ -42,7 +42,7 @@
 
 > 用例函数 22 个，收集条目 24 条：`test_login_failure` 用 `pytest.mark.parametrize` 展开成 3 条（数据来自 [data/login_data.yaml](data/login_data.yaml)：锁定用户 / 空用户名 / 错误密码）。
 >
-> 其中登录失败的 3 条曾因用例设计缺陷稳定失败，已按[第 8 节](#8-已知问题与待办)的 P0 条目修复（运行时复跑仍待在普通终端确认）。
+> 其中登录失败的 3 条曾因用例设计缺陷稳定失败，已按[第 8 节](#8-已知问题与待办)的 P0 条目修复，并在修复后实测通过（`-m login` → 4 passed）。
 
 ### 明确不在范围内
 
@@ -148,17 +148,27 @@ python -m venv autotest
 
 ### 跑测试
 
+**推荐（任何终端都能用，不受 PowerShell 脚本执行策略影响）：**
+
+```powershell
+Set-Location 'D:\Code\Python\autotest'
+.\autotest\Scripts\python.exe -m pytest -o addopts="" -q
+```
+
+`-o addopts=""` 用来跳过 `pytest.ini` 里的 `--clean-alluredir`，避免清掉已有报告；要生成报告就去掉这个参数。
+
 | 场景 | 命令 |
 |---|---|
-| 全部用例 | `.\run_tests.ps1` |
-| 只跑冒烟 | `.\run_tests.ps1 -m smoke` |
-| 只跑本地等待自测（不联网，最快） | `.\run_tests.ps1 -m wait -m action` |
-| 只跑某个模块 | `.\run_tests.ps1 -m login` |
-| 指定用例 | `.\run_tests.ps1 tests/test_cart.py::test_cart_total` |
-| 关键字过滤 | `.\run_tests.ps1 -k "badge or sort"` |
-| 只收集不执行（看用例清单） | `.\run_tests.ps1 --collect-only -q` |
+| 全部用例 | `.\autotest\Scripts\python.exe -m pytest` |
+| 只跑冒烟 | `... -m smoke` |
+| 只跑本地等待自测（不联网，最快） | `... -m "wait or action"` |
+| 只跑某个模块 | `... -m login` |
+| 指定用例 | `... tests/test_cart.py::test_cart_total` |
+| 关键字过滤 | `... -k "badge or sort"` |
+| 只收集不执行（看用例清单） | `... --collect-only -q` |
+| 无头运行（不弹窗口、更快） | 先 `$env:CI = "true"`，再执行上面任意一条 |
 
-`run_tests.ps1` 只是个很薄的包装：定位 venv 里的 `python.exe`、设好 `SE_OFFLINE=true`、把 `@args` 原样透传给 `pytest`，最后用 `$LASTEXITCODE` 透传退出码。直接调 `.\autotest\Scripts\python.exe -m pytest` 效果相同。
+**`run_tests.ps1` 也可以**，它与上面完全等价（`.\run_tests.ps1 -m login`），但它是个 `.ps1` 脚本，在限制脚本执行的环境里会被拦（详见第 8 节 P3/P4）。它只是薄包装：定位 venv 的 `python.exe`、设 `SE_OFFLINE=true`、透传参数、透传退出码——其中 `SE_OFFLINE` 现在也由 [driver_factory.py](utils/driver_factory.py) 兜底了。
 
 ### 环境变量
 
@@ -274,8 +284,16 @@ allure open report
 | 本地等待自测 | `pytest tests/test_wait_utils.py`，`CI=true`（headless）+ `-o addopts=""` | **13 passed**，46.4s |
 | 冒烟 | `pytest tests/test_smoke.py`，不设 `CI`（真实窗口 + IPv6 固定） | **1 passed**，4.7s（call 阶段 2.1s） |
 | 其余外网用例 | `pytest` 登录/库存/购物车/结账 4 个文件 | **4 failed, 6 passed**，425.5s |
+| 本地等待自测（P5/P6 修复后复跑） | `pytest -m "wait or action"`，`CI=true` | **13 passed, 11 deselected**，**43.0s** ✅ |
+| 登录模块（P0 修复后复跑） | `pytest -m login`，`CI=true` | **4 passed, 20 deselected**，**17.8s** ✅ |
+| 其余外网用例（P0 修复后复跑） | `pytest -m "smoke or inventory or cart or checkout"`，`CI=true` | **7 passed, 17 deselected**，**55.7s** ✅ |
+| **全量一次性跑通（P5 加固后）** | `pytest`（不加 `-m` 过滤），`CI=true` | **24 passed**，**220.5s（3:40）** ✅ |
 
-### P0（已修复）：登录失败用例必然失败，断言根本没执行
+> **当前状态：24 条全部实测通过**，且已用一次不加过滤的全量运行确认（`24 passed in 220.48s`）。修复前那批 `4 failed` 全部来自登录用例的 P0 缺陷。
+>
+> 注：分批跑合计约 116s，全量跑 220s，差异主要来自外网用例的网络波动与偶发启动重试，不是固定开销。
+
+### P0（已修复，实测通过）：登录失败用例必然失败，断言根本没执行
 
 `LoginPage.login()` 点完登录按钮后无条件执行 `until_url_contains("inventory.html")`（[login_page.py](pages/login_page.py#L16)）。失败场景的 URL 永远停在 `https://www.saucedemo.com/`，于是 3 条失败用例都在 10s 后抛 `WaitTimeoutError`，`assert data["expected"] in get_error_message()` 一行都没跑到。实测报错原文：
 
@@ -288,11 +306,19 @@ WaitTimeoutError: 等待超时（10.0s）：期望「URL 包含 'inventory.html'
 
 修复（已实施）：把 `login()` 拆成两步——`submit_credentials()` 只填充并点击、不判断跳转；`login()` 在此基础上再断言 `until_url_contains("inventory.html")`，失败用例改用 `submit_credentials()` + 等待错误提示可见，并补一条「URL 没有变成 inventory.html」的断言。正负两条路径各用各的等待条件。
 
-**验证状态**：改动后 `pytest --collect-only` 收集到 24 条、导入全部正常；但运行时复跑被环境阻断（Chrome 无法启动，见本节末尾），3 条失败用例是否转绿尚未实测。
+**验证状态：已实测通过。** 修复后 `pytest -m login` 结果：
+
+```
+4 passed, 20 deselected in 17.81s
+```
+
+4 条登录用例（1 条成功 + 3 条失败场景）全部通过，总耗时 17.8 秒——原来 3 条失败场景各要干等 10s 超时（合计 30s+），现在不再等待，说明失败分支确实走上了「等错误提示」而不是「等 URL 跳转」。
 
 ### P1：`test_login_success` 出现过一次 120s 挂起
 
 `driver.get("https://www.saucedemo.com/")` 卡在 chromedriver 的 read timeout（`read timeout=120`），而同批后面的库存/购物车/结账用例（同样要登录）全部通过；同配置下单跑冒烟只用 2.1s。怀疑与本地钉死 IPv6 的 `--host-resolver-rules` 有关：钉成单一地址后失去多地址回退，IPv6 路径一抖就整体挂住。待复现确认，排障时可去掉 MAP 规则或用 `USE_SYSTEM_PROXY=1` 做对照实验。
+
+**复跑情况**：P0 修复后重跑 `-m login`（4 条，含 `test_login_success`）耗时 17.8 秒、未再出现长挂起。因只跑了一轮，仍按「偶发、未定位」保留，不宣称已解决。
 
 ### P2：其它待办
 
@@ -329,4 +355,144 @@ chrome.exe --headless=new --user-data-dir=... --dump-dom about:blank
 ```
 
 即 Chrome 的崩溃上报进程和 Mojo IPC 命名通道都被拒绝，浏览器自身无法启动，`--no-sandbox` 与 `--disable-breakpad` 均无效。结论：**UI 用例必须在普通终端（或 CI）里执行**，受限的自动化会话只能做收集、静态检查这类不启动浏览器的工作。
+
+### P3：终端里「pytest 不能用」——其实是 venv 没激活
+
+最常见的误判。症状是 `pytest --version` 报 `ModuleNotFoundError: No module named 'pytest'`，或者 `python -m pytest` 找不到 selenium，但项目本身完好。
+
+判据（两条命令即可分清）：
+
+```powershell
+# A. 用 venv 解释器直接问 —— 正常会打印版本号
+& '.\autotest\Scripts\python.exe' -m pytest --version
+
+# B. 用终端里的 python 问 —— 若这里报 ModuleNotFoundError，就是没激活
+python -m pytest --version
+```
+
+A 正常、B 失败 = **只是终端里的 `python` 指向系统解释器**（`D:\Program Files (x86)\Python\python.exe`），那里没装依赖。三种解法，任选：
+
+1. **直接用项目脚本**（推荐，最省心）：
+   ```powershell
+   .\run_tests.ps1
+   ```
+   它内部写死 `autotest\Scripts\python.exe`，完全不依赖终端激活状态。
+2. **显式用 venv 解释器**（等价写法，注意先切目录）：
+   ```powershell
+   Set-Location 'D:\Code\Python\autotest'
+   & '.\autotest\Scripts\python.exe' -m pytest -o addopts="" -q
+   ```
+3. **让 VS Code 终端自动激活**：`Ctrl+Shift+P` → *Python: Select Interpreter* → 选 `autotest\Scripts\python.exe`。若此时终端报「未对文件 ...\Activate.ps1 进行数字签名」，见下一条。
+
+### P4：`Activate.ps1` 报「未进行数字签名 / UnauthorizedAccess」
+
+本机 `Get-ExecutionPolicy` 是 `RemoteSigned`，正常应允许本地未签名脚本。已排除的方向：
+
+- 该文件**没有** `Zone.Identifier`（`Get-Item -Stream Zone.Identifier` 无输出、`dir /r` 无流），不是「来自网络」标记；
+- 不是文件损坏：删掉重建、换新脚本同样报错；
+- 不是组策略：`MachinePolicy`/`UserPolicy` 均为 `Undefined`，注册表 `Policies\Microsoft\Windows\PowerShell` 无值；
+- 不是 PowerShell 配置文件：`$PROFILE` 三类文件都不存在。
+
+最终只在**受限执行环境**里稳定复现（该环境同时拒绝 `fsutil`、`Get-CimInstance`、`Get-MpComputerStatus`，且对 `.ps1` 施加了 AllSigned 级限制）。**普通窗口不受影响**（新建脚本可直接运行）。
+
+如果确实需要在报错的环境里激活，用可回退的放宽手段：
+
+```powershell
+Set-ExecutionPolicy -Scope Process  -ExecutionPolicy Bypass   # 只影响当前终端
+Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy Bypass # 长期生效（可改回 RemoteSigned）
+```
+
+`Bypass` 是实测唯一能穿透该拦截的档位（`RemoteSigned` / `Unrestricted` 均失败）。
+
+### P5：`session not created: cannot create temp dir for user data dir`（已修）
+
+症状：所有用例在 `driver` fixture 处失败，报
+
+```
+selenium.common.exceptions.SessionNotCreatedException: Message: session not created
+from unknown error: cannot create temp dir for user data dir
+```
+
+不是驱动版本、不是磁盘空间、也不是 `%TEMP%` 指向异常（本机 `%TEMP%` 就是 `C:\Users\1\AppData\Local\Temp`，可正常写）。
+
+**根因**：默认由 chromedriver 在 `%TEMP%` 下创建 Chrome 的 user-data 目录，并且会给该目录设置一个自定义 DACL——这一步需要 `WRITE_DAC`，在权限被收紧的环境里会失败（与本文档前面记录的 `grantWrite` 失败属同一类）。
+
+**修复**（[utils/driver_factory.py](utils/driver_factory.py#L12-L29)）：改由 Python 用普通权限在项目内 `.tmp/` 下建目录，再通过 `--user-data-dir` 显式传给 Chrome，绕开 chromedriver 的目录创建：
+
+```python
+path = os.path.join(base, "chrome-profile-" + uuid.uuid4().hex[:8])
+os.makedirs(path, exist_ok=True)
+options.add_argument(f"--user-data-dir={path}")
+atexit.register(shutil.rmtree, path, True)   # 退出时尽力清理
+```
+
+几个实现细节：
+
+- 目录**不带受限 ACL**（刻意不用 `tempfile.mkdtemp`，它会给目录加受限 ACL，后续删除会 `Access denied`）；
+- 每条用例独立目录，不会串 cookie/缓存，不影响登录类用例的「干净会话」前提；
+- `.tmp/` 已加入 [.gitignore](.gitignore)；
+- 设 `KEEP_CHROME_PROFILE=1` 可保留现场（目录不自动删），排查用。
+
+**同类第二处**：修掉 user-data 目录之后，会暴露另一个同源错误——
+
+```
+session not created: from unknown error: cannot create temp dir for unpacking extensions
+```
+
+chromedriver 还要在 `TEMP` 下建「解包扩展」用的目录，同样会设自定义 DACL。因此 [utils/driver_factory.py](utils/driver_factory.py) 里额外有 `_prepare_temp_dir()`：把 `TEMP`/`TMP` 指向项目内 `.tmp/tmp/`（该目录权限通常比用户 Temp 宽），并写回 `os.environ` 让 Selenium 派生的 chromedriver 继承。设 `CHROME_TEMP_DIR=system` 可沿用系统 TEMP。
+
+**回滚**：删掉 `_user_data_dir()` / `_prepare_temp_dir()` 两个函数及 `create_driver()` 里对应的三行调用即可恢复默认行为。（加固与重试的回滚见本节末尾）
+
+**验证结果：已实测通过。** 修复后同一台机器上跑 `pytest -m "wait or action"`：
+
+```
+13 passed, 11 deselected in 43.02s
+```
+
+即 13 条本地用例全部通过、总耗时 43 秒（单次 `create_driver()` 从分钟级降到秒级）。注意这些改动只影响**测试进程内**的 `TEMP`/`TMP` 与 Chrome 启动参数，不改变系统环境变量。
+
+**该故障会偶发**：同一台机器、同一套配置，出现过「一次 `DRIVER OK`、下一次却报 `cannot create temp dir for unpacking extensions`」的情况——说明 chromedriver 建临时目录本身就是不稳的，不是配置选错。因此又加了三层加固：
+
+| 加固 | 目的 |
+|---|---|
+| 建目录后 `icacls <dir> /grant <user>:(OI)(CI)F` | 继承 ACL 不够时补授权（失败静默跳过） |
+| `--disable-extensions` | 不加载扩展，让 chromedriver 不必走「解包扩展」那条建目录的路径 |
+| 启动失败最多重试 3 次，每次换新 profile 目录 | 覆盖偶发失败；3 次全败才抛出原始异常 |
+
+加固后复跑：`13 passed, 11 deselected in 43.62s` ✅
+
+**回滚**：删掉 `_user_data_dir()` / `_prepare_temp_dir()` / `_grant_full_control()` 及 `create_driver()` 里的重试循环，恢复成直接 `webdriver.Chrome(options=...)` 即可。
+
+### P6：跑一个用例要卡 1~3 分钟才出第一个结果（已修）
+
+症状：`pytest` 启动后长时间没有任何输出，三分钟左右才蹦出第一个 `E`；用例越多等得越久。慢的不是浏览器，是 **Selenium Manager 的联网校验**。
+
+每个用例的 `driver` fixture 都会构造一次 `webdriver.Chrome()`，Selenium Manager 在这之前要访问 `googlechromelabs.github.io` 核对驱动版本。该域名在受限网络下不可达，于是每次先等完几个 TCP 超时（累计 1~3 分钟）才回退本地缓存——`13` 条用例就是半小时。
+
+**为什么之前不容易发现**：[run_tests.ps1](run_tests.ps1#L13) 里设了 `$env:SE_OFFLINE = "true"`，走它跑就不会有这个等待；但一旦改成直接调解释器（`.\autotest\Scripts\python.exe -m pytest ...`，P3 里推荐的写法），这个开关就丢了。
+
+**修复**（[utils/driver_factory.py](utils/driver_factory.py)）：在 `create_driver()` 开头兜底
+
+```python
+os.environ.setdefault("SE_OFFLINE", "true")
+```
+
+这样无论从哪个入口跑都会离线，且 `SE_OFFLINE=false` 仍可显式覆盖（需要更新驱动时）。
+
+**判据**：修复前后同一机器上单条用例的 `create_driver()` 耗时从分钟级降到秒级。
+
+**验证结果：已实测通过。** 修复后 `pytest -m "wait or action"` 全程 **43.02 秒**跑完 13 条（修复前一个用例就要三分钟）。
+
+---
+
+## 9. 本次会话遗留的「非项目」问题（备忘）
+
+排查过程中确认过、但与本项目代码无关的坑，记录下来避免重复踩：
+
+| 问题 | 结论 |
+|---|---|
+| `run_tests.ps1` 报「未进行数字签名」 | 项目文件带「来自网络」标记，`RemoteSigned` 要求签名。`Unblock-File` / 删 ADS 均无效；用 `Set-ExecutionPolicy -Scope CurrentUser Bypass` 或直接调 venv 解释器可绕过（见 P3/P4） |
+| VS Code 安装被更新中断（`resources` 被挪进 `<commit>\` 目录） | 表现为 `Code.exe` 启动即退出（`--version` 打印的是 Electron 版本而非 VS Code 版本）。修法：从该 commit 目录把文件铺回安装根目录，或按官方安装包覆盖重装 |
+
+
 

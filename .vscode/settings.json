@@ -1,3 +1,12 @@
 {
-    "python-envs.defaultEnvManager": "ms-python.python:venv"
+    "python-envs.defaultEnvManager": "ms-python.python:venv",
+
+    // 显式指向项目自带的虚拟环境（路径含本机绝对路径，换机器需改）。
+    // 目的：即使终端没激活 venv，VS Code 的测试面板/运行按钮也会用这个解释器，
+    // 不会退回系统 Python 而报 ModuleNotFoundError。
+    "python.defaultInterpreterPath": "D:\\Code\\Python\\autotest\\autotest\\Scripts\\python.exe",
+
+    "python.testing.pytestEnabled": true,
+    "python.testing.unittestEnabled": false,
+    "python.testing.pytestArgs": ["tests"]
 }
