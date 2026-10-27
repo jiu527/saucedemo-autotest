@@ -306,11 +306,12 @@ allure open report
 | 本地等待自测（P5/P6 修复后复跑） | `pytest -m "wait or action"`，`CI=true` | **13 passed, 11 deselected**，**43.0s** ✅ |
 | 登录模块（P0 修复后复跑） | `pytest -m login`，`CI=true` | **4 passed, 20 deselected**，**17.8s** ✅ |
 | 其余外网用例（P0 修复后复跑） | `pytest -m "smoke or inventory or cart or checkout"`，`CI=true` | **7 passed, 17 deselected**，**55.7s** ✅ |
-| **全量一次性跑通（P5 加固后）** | `pytest`（不加 `-m` 过滤），`CI=true` | **24 passed**，**220.5s（3:40）** ✅ |
+| **全量一次性跑通（P5 加固后，当时 24 条）** | `pytest`（不加 `-m` 过滤），`CI=true` | **24 passed**，**220.5s（3:40）** ✅ |
+| **全量跑通（P7 + 网络重试后，当前 27 条）** | `pytest`（不加 `-m` 过滤），`CI=true` | **27 passed**，**125.2s（2:05）** ✅ |
 
-> **当前状态：24 条全部实测通过**，且已用一次不加过滤的全量运行确认（`24 passed in 220.48s`）。修复前那批 `4 failed` 全部来自登录用例的 P0 缺陷。
+> **当前状态：27 条全部实测通过**，全量运行 `27 passed in 125.15s`。修复前那批 `4 failed` 全部来自登录用例的 P0 缺陷。
 >
-> 注：分批跑合计约 116s，全量跑 220s，差异主要来自外网用例的网络波动与偶发启动重试，不是固定开销。
+> 注：用例数从 24 增至 27，是因为给 `WaitUtils` 新增了 `elements_now` 与 `click_until` 两个能力，各配了自测（1 条 + 2 条）。总耗时反而从 220s 降到 125s——P7 修掉了「点击落空后干等 10s」的浪费，`click_until` 让失败路径从「等到超时」变成「4 秒内重试」。
 
 ### P0（已修复，实测通过）：登录失败用例必然失败，断言根本没执行
 
@@ -530,6 +531,8 @@ wait.click_until(remove_btn, lambda: wait.invisible(row, timeout=4))
 
 **经验**：这类「点了没反应」只能靠**效果**判断，靠加大 `timeout` 或 `launchWatchMs` 式的窗口调整都治不了——时间从不是矛盾的主要方面。
 
+**验证结果：已实测通过。** 全量跑 `27 passed in 125.15s`，此前反复失败的四条（`test_cart_total`、`test_remove_item_empties_cart`、`test_overview_lists_added_items`、`test_checkout_complete_order`）全部转绿。
+
 **顺带修的另一类**：同一轮本地复跑还出现过
 
 ```
@@ -604,5 +607,17 @@ LAPTOP-1KPPH0S2\1             Allow  FullControl
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass   # 只影响当前终端
 .\run_tests.ps1 -m "wait or action"
+```
+
+**一个副作用（已实测）**：`icacls /reset` 会把工具沙箱写在这里的显式 ACE 一并清掉，之后 DSH 的命令执行会重新报最初的
+
+```
+SetNamedSecurityInfoW failed (Win32 5): grantWrite(D:\Code\Python\autotest)
+```
+
+恢复只需给本机用户补回显式 ACE（与沙箱无关，纯属让它能再授权）：
+
+```powershell
+icacls 'D:\Code\Python\autotest' /grant "1:(OI)(CI)F"
 ```
 
