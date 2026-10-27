@@ -503,8 +503,63 @@ if not os.getenv("CI"):
 
 | 问题 | 结论 |
 |---|---|
-| `run_tests.ps1` 报「未进行数字签名」 | 项目文件带「来自网络」标记，`RemoteSigned` 要求签名。`Unblock-File` / 删 ADS 均无效；用 `Set-ExecutionPolicy -Scope CurrentUser Bypass` 或直接调 venv 解释器可绕过（见 P3/P4） |
+| `run_tests.ps1` 报「未进行数字签名」 | **根因不在文件上**：同一个 `.ps1` 换到别处就能跑，只有本项目目录里不行（详见下方「只在某个目录里被拦」）。绕过：`Set-ExecutionPolicy -Scope CurrentUser Bypass`，或直接调 venv 解释器（见 P3/P4） |
 | VS Code 安装被更新中断（`resources` 被挪进 `<commit>\` 目录） | 表现为 `Code.exe` 启动即退出（`--version` 打印的是 Electron 版本而非 VS Code 版本）。修法：从该 commit 目录把文件铺回安装根目录，或按官方安装包覆盖重装 |
 
+### 只在某个目录里被拦：`D:\Code\Python\autotest` 的 `.ps1` 一律被判「未签名」
 
+**现象**：这个目录里**任何** `.ps1` 都加载不了，包括刚用 `Set-Content` 新建的空脚本，报
+
+```
+无法加载文件 D:\Code\Python\autotest\probe.ps1。未对文件 ... 进行数字签名。
+```
+
+**对照实验（都成立）**：
+
+| 对象 | 结果 |
+|---|---|
+| 同一文件复制到 `C:\Users\1\` 后运行 | ✅ 正常 |
+| 同盘兄弟目录 `D:\Code\Python\zz_probe\` 里新建并运行 | ✅ 正常 |
+| 同窗口运行**另一个项目**（`D:\Code\Python\` 下）的 `Activate.ps1` | ✅ 正常 |
+| 本项目目录里任何脚本 | ❌ 一律「未签名」 |
+| 本项目目录 + `powershell -ExecutionPolicy Bypass -File ...` | ✅ 正常 |
+
+**已排除**：
+
+- 不是「来自网络」标记：`cmd /c dir /r` 显示无 `:Zone.Identifier`，`Unblock-File`、删掉重建都无效；
+- 不是链接/挂载：`Get-Item` 的 `LinkType` 为空、`Target` 为空，上层无 junction；
+- 不是策略档位：`Get-ExecutionPolicy -List` 只有 `CurrentUser = RemoteSigned`，其余全 `Undefined`；
+- 不是 Smart App Control（`VerifiedAndReputablePolicyState = 0`）、不是组策略。
+
+**目录级差异已确认，但根因未定位。** 与同盘正常目录 `D:\Code\Python\zz_probe` 逐条对比，本项目目录的 ACL 曾多出三条 ACE：
+
+```
+Everyone                      Deny   DeleteSubdirectoriesAndFiles
+S-1-4-75743169-120922801      Allow  DeleteSubdirectoriesAndFiles, Write, Delete, Synchronize
+LAPTOP-1KPPH0S2\1             Allow  FullControl
+```
+
+（`S-1-4-...` 不是普通用户 SID，属 NON_UNIQUE 授权；配合会话最初出现过的 `SetNamedSecurityInfoW failed (Win32 5): grantWrite(D:\Code\Python\autotest)`，这些 ACE 大概率是工具沙箱接管工作区时写入的残留。）
+
+**但这三条 ACE 不是原因**：做了有备份的因果验证 —— `icacls /save` 备份 → `/reset` 重置为继承权限 → 重新测试，**仍然报「未签名」**。ACL 只是同一批工具留下的痕迹。
+
+**逐个排除过的假设**：
+
+| 假设 | 排除依据 |
+|---|---|
+| 文件带「来自网络」标记 | `cmd /c dir /r` 无 `:Zone.Identifier`；`Unblock-File`、删掉重建均无效 |
+| 目录带 Zone 标记 | `dir /r` 显示两个目录都没有目录级数据流 |
+| 目录 ACL 异常 | `icacls /reset` 后仍复现（见上） |
+| 目录是 junction / 挂载点 | `Get-Item` 的 `LinkType`、`Target` 皆为空，上层 `dir /al` 无链接 |
+| 执行策略档位 / 组策略 | `Get-ExecutionPolicy -List` 只有 `CurrentUser = RemoteSigned`，其余 `Undefined` |
+| Smart App Control | `VerifiedAndReputablePolicyState = 0` |
+
+**当前认知**：现象只在本目录树复现，且 `-ExecutionPolicy Bypass` 能穿透（说明闸门就是 PowerShell 的 AuthorizationManager），但**无法解释为什么只有这个目录下的脚本被判定为「需要签名」**。剩余可能性（按路径生效的安全软件/代理规则、AMSI 提供程序异常等）都缺乏证据，不再深挖。
+
+**实际影响很小**：pytest 不经过 `.ps1`，`.\autotest\Scripts\python.exe -m pytest` 一直可用；只有 `.\run_tests.ps1` 这类脚本入口会撞上。绕过方式：
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass   # 只影响当前终端
+.\run_tests.ps1 -m "wait or action"
+```
 
