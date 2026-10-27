@@ -116,11 +116,11 @@ def create_driver():
     # 该域名（googlechromelabs.github.io）在受限网络下不可达，于是每个用例都要
     # 先等 1~3 分钟的 TCP 超时、才回退本地缓存——表现为「跑一个用例卡三分钟」。
     #
-    # 注意只在**非 CI** 环境兜底：CI（GitHub Actions）跑在干净的 runner 上，
-    # 本地既没有驱动缓存、又常常依赖 Selenium Manager 现下驱动；强制离线会让
-    # runner 上拿不到 chromedriver 而整体失败。需要联网更新驱动时设
-    # SE_OFFLINE=false 覆盖即可。
-    if not os.getenv("CI"):
+    # 判断条件用 GITHUB_ACTIONS 而不是 CI：本地常为了无头而设 CI=true，那时
+    # 仍然需要离线（否则每个用例又开始等网络超时）；而 CI 跑在全新 runner 上、
+    # 没有本地驱动缓存、要靠 Selenium Manager 现下驱动，必须允许联网。
+    # 需要手动覆盖时设 SE_OFFLINE=false（或 true）即可。
+    if not os.getenv("GITHUB_ACTIONS"):
         os.environ.setdefault("SE_OFFLINE", "true")
 
     # 给 chromedriver 一个能建临时目录的 TEMP（见上方注释）

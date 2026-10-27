@@ -1,3 +1,4 @@
+from selenium.common.exceptions import WebDriverException
 from utils.wait_utils import WaitTimeoutError
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
@@ -48,6 +49,31 @@ class CartPage(BasePage):
         self.wait.invisible(row)
 
     def checkout(self):
-        """点击 Checkout，跳转到 checkout-step-one 页。"""
-        self.wait.click(self.CHECKOUT_BTN)
-        self.wait.until_url_contains("checkout-step-one.html")
+        """点击 Checkout，跳转到 checkout-step-one 页。
+
+        与 InventoryPage.add_to_cart 同理：以 URL 变化为成功判据，
+        点一次没跳转就再点（CI 上偶发，事件监听未就绪或布局漂移时点击无效）。
+        """
+        last_error = None
+        for attempt in range(1, 4):
+            try:
+                element = self.wait.clickable(self.CHECKOUT_BTN)
+                self.driver.execute_script(
+                    "arguments[0].scrollIntoView({block: 'center'});", element
+                )
+                if attempt == 2:
+                    self.driver.execute_script("arguments[0].click();", element)
+                else:
+                    element.click()
+            except WebDriverException as exc:
+                last_error = exc
+                continue
+
+            try:
+                self.wait.until_url_contains("checkout-step-one.html", timeout=4)
+                return
+            except WaitTimeoutError as exc:
+                last_error = exc
+                continue
+
+        raise last_error
