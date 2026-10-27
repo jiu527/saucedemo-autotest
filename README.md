@@ -216,6 +216,17 @@ allure open report
 | 执行 | `pytest --alluredir=allure-results --clean-alluredir`，并设 `CI=true` 触发 headless |
 | 产物 | `if: always()` 上传 `allure-results/` 为 artifact（用例挂了也能拿到结果） |
 
+### 实际运行状态
+
+**已跑通（绿）**：最近一次 CI 通过。踩过的坑见下方「CI 相关」。
+
+### CI 相关踩坑记录
+
+| 坑 | 表现 | 处置 |
+|---|---|---|
+| `requirements.txt` 是 UTF-16LE 带 BOM | 本地 pip 靠 BOM 容错，Linux 侧/其它工具链不一定 | 转成无 BOM 的 UTF-8 |
+| `driver_factory` 无条件强制 `SE_OFFLINE=true` | runner 上没有驱动缓存又禁止联网 → 所有用例 setup 失败（曾出现 20 passed / 4 errors 里的一部分） | 改成只在非 `CI` 环境兜底 |
+
 ### 本地与 CI 的行为差异
 
 | 行为 | 本地 | CI |
@@ -471,13 +482,14 @@ chromedriver 还要在 `TEMP` 下建「解包扩展」用的目录，同样会�
 
 **为什么之前不容易发现**：[run_tests.ps1](run_tests.ps1#L13) 里设了 `$env:SE_OFFLINE = "true"`，走它跑就不会有这个等待；但一旦改成直接调解释器（`.\autotest\Scripts\python.exe -m pytest ...`，P3 里推荐的写法），这个开关就丢了。
 
-**修复**（[utils/driver_factory.py](utils/driver_factory.py)）：在 `create_driver()` 开头兜底
+**修复**（[utils/driver_factory.py](utils/driver_factory.py)）：在 `create_driver()` 开头兜底，**但只在非 CI 环境生效**：
 
 ```python
-os.environ.setdefault("SE_OFFLINE", "true")
+if not os.getenv("CI"):
+    os.environ.setdefault("SE_OFFLINE", "true")
 ```
 
-这样无论从哪个入口跑都会离线，且 `SE_OFFLINE=false` 仍可显式覆盖（需要更新驱动时）。
+`CI` 判断是必需的：CI 跑在全新 runner 上，本地没有驱动缓存、往往要靠 Selenium Manager 现下驱动；无条件强制离线会让 runner 拿不到 chromedriver，表现为**所有用例在 setup 阶段失败**（这个坑实际踩过一次，见下方「CI 相关」）。需要联网更新驱动时设 `SE_OFFLINE=false` 显式覆盖。
 
 **判据**：修复前后同一机器上单条用例的 `create_driver()` 耗时从分钟级降到秒级。
 
