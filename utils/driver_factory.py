@@ -15,11 +15,13 @@ _LAUNCH_ATTEMPTS = 3
 
 
 def _grant_full_control(path):
-    """尽力给目录补一条当前用户的 FullControl ACE。
+    """尽力给目录补一条当前用户的 FullControl ACE（仅 Windows）。
 
     chromedriver 建临时目录 / Chrome 写 profile 都需要较宽的权限；某些环境下
     目录的继承 ACL 不够，补一条最省事。失败就静默跳过，不影响主流程。
     """
+    if os.name != "nt":
+        return
     user = os.environ.get("USERNAME")
     if not user:
         return
@@ -64,7 +66,11 @@ def _prepare_temp_dir():
 
     这里把 TEMP/TMP 指向项目内 .tmp/tmp（并补 FullControl），写回 os.environ
     让 Selenium 派生的 chromedriver 继承。设 CHROME_TEMP_DIR=system 可沿用系统 TEMP。
+
+    仅 Windows 需要（macOS/Linux 的临时目录没有这个权限问题）。
     """
+    if os.name != "nt":
+        return None
     if os.getenv("CHROME_TEMP_DIR", "").lower() == "system":
         return None
     path = os.path.join(_PROJECT_ROOT, ".tmp", "tmp")
@@ -109,9 +115,13 @@ def create_driver():
     # Selenium Manager 默认每次构造 driver 前都会联网校验 chromedriver 版本。
     # 该域名（googlechromelabs.github.io）在受限网络下不可达，于是每个用例都要
     # 先等 1~3 分钟的 TCP 超时、才回退本地缓存——表现为「跑一个用例卡三分钟」。
-    # 这里默认离线（与 run_tests.ps1 的行为一致），需要联网更新驱动时设
+    #
+    # 注意只在**非 CI** 环境兜底：CI（GitHub Actions）跑在干净的 runner 上，
+    # 本地既没有驱动缓存、又常常依赖 Selenium Manager 现下驱动；强制离线会让
+    # runner 上拿不到 chromedriver 而整体失败。需要联网更新驱动时设
     # SE_OFFLINE=false 覆盖即可。
-    os.environ.setdefault("SE_OFFLINE", "true")
+    if not os.getenv("CI"):
+        os.environ.setdefault("SE_OFFLINE", "true")
 
     # 给 chromedriver 一个能建临时目录的 TEMP（见上方注释）
     _prepare_temp_dir()
