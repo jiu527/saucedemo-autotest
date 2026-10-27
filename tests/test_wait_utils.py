@@ -99,6 +99,43 @@ def test_click(driver, wait):
 
 
 @pytest.mark.action
+def test_click_until_waits_for_effect(driver, wait):
+    """click_until 在点击生效后返回，不再额外等待。"""
+    driver.get(PAGE)
+    wait.click_until(
+        (By.ID, "btn"),
+        lambda: wait.text_of((By.ID, "click-result"), timeout=1) == "clicked",
+    )
+    assert wait.text_of((By.ID, "click-result")) == "clicked"
+
+
+@pytest.mark.action
+def test_click_until_retries_when_click_does_nothing(driver, wait, monkeypatch):
+    """模拟「点了但没反应」：click_until 必须再点一次而不是直接失败。
+
+    这正是 CI 上反复出现的故障形态（按钮可见可点击，点击落空）。
+    """
+    driver.get(PAGE)
+    real_click = wait.click
+    calls = {"n": 0}
+
+    def flaky_click(locator, timeout=None):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return                      # 第一次点击「落空」
+        return real_click(locator, timeout)
+
+    monkeypatch.setattr(wait, "click", flaky_click)
+
+    wait.click_until(
+        (By.ID, "btn"),
+        lambda: wait.text_of((By.ID, "click-result"), timeout=1) == "clicked",
+    )
+    assert calls["n"] >= 2, f"点击落空后没有重试，click 只被调用 {calls['n']} 次"
+    assert wait.text_of((By.ID, "click-result")) == "clicked"
+
+
+@pytest.mark.action
 def test_type_text_clears_by_default(driver, wait):
     driver.get(PAGE)
     wait.type_text((By.ID, "name-input"), "new value")

@@ -25,9 +25,15 @@ class CheckoutPage(BasePage):
         self.type(self.POSTAL_CODE, zip)
 
     def continue_to_overview(self):
-        """提交第一步信息，进入 Checkout: Overview（第二步）。"""
-        self.wait.click(self.CONTINUE_BTN)
-        self.wait.until_url_contains("checkout-step-two.html")
+        """提交第一步信息，进入 Checkout: Overview（第二步）。
+
+        用 `click_until` 以 URL 变化为判据重试：CI 上偶发「点了 Continue 但
+        页面没跳转」（点击落空），此时如果只是死等 URL 就会白等 10 秒。
+        """
+        self.wait.click_until(
+            self.CONTINUE_BTN,
+            lambda: self.wait.until_url_contains("checkout-step-two.html", timeout=4),
+        )
 
     def get_subtotal(self):
         """返回页面展示的 Item total"""
@@ -40,8 +46,10 @@ class CheckoutPage(BasePage):
 
     def finish(self):
         """在 Overview 页点击 Finish，跳转完成页。"""
-        self.click(self.FINISH_BTN)
-        self.wait.until_url_contains("checkout-complete")
+        self.wait.click_until(
+            self.FINISH_BTN,
+            lambda: self.wait.until_url_contains("checkout-complete", timeout=4),
+        )
 
     def get_complete_header(self):
         return self.get_text(self.COMPLETE_HEADER)

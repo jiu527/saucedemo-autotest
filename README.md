@@ -36,11 +36,11 @@
 | 库存页（加购角标、价格排序） | [tests/test_inventory.py](tests/test_inventory.py) | `inventory` | 2 | 2 | ✅ |
 | 购物车（总价核对、移除商品） | [tests/test_cart.py](tests/test_cart.py) | `cart` | 2 | 2 | ✅ |
 | 结账（Overview 商品列表、下单完成） | [tests/test_checkout.py](tests/test_checkout.py) | `checkout` | 2 | 2 | ✅ |
-| 等待封装 · 第 1 层基础等待 | [tests/test_wait_utils.py](tests/test_wait_utils.py) | `wait` | 7 | 7 | ❌ |
-| 等待封装 · 第 2 层交互 | [tests/test_wait_utils.py](tests/test_wait_utils.py) | `action` | 6 | 6 | ❌ |
-| **合计** | | | **22** | **24** | |
+| 等待封装 · 第 1 层基础等待 | [tests/test_wait_utils.py](tests/test_wait_utils.py) | `wait` | 8 | 8 | ❌ |
+| 等待封装 · 第 2 层交互 | [tests/test_wait_utils.py](tests/test_wait_utils.py) | `action` | 8 | 8 | ❌ |
+| **合计** | | | **25** | **27** | |
 
-> 用例函数 22 个，收集条目 24 条：`test_login_failure` 用 `pytest.mark.parametrize` 展开成 3 条（数据来自 [data/login_data.yaml](data/login_data.yaml)：锁定用户 / 空用户名 / 错误密码）。
+> 用例函数 25 个，收集条目 27 条：`test_login_failure` 用 `pytest.mark.parametrize` 展开成 3 条（数据来自 [data/login_data.yaml](data/login_data.yaml)：锁定用户 / 空用户名 / 错误密码）。
 >
 > 其中登录失败的 3 条曾因用例设计缺陷稳定失败，已按[第 8 节](#8-已知问题与待办)的 P0 条目修复，并在修复后实测通过（`-m login` → 4 passed）。
 
@@ -114,6 +114,8 @@ data/login_data.yaml        ← 外部测试数据
 
 - 第 1 层（查询）：`visible` / `present` / `clickable` / `invisible` / `all_visible` / `present_all` / `elements_now` / `until_url_contains`
 - 第 2 层（交互）：`click` / `type_text` / `text_of` / `attr_of`，内部带 stale 元素重新定位重试
+- `click_until(locator, waiter)`：点击后以 `waiter()` 为「生效」判据重试，专治 CI 上「点了没反应」（见 P7）
+- `elements_now(locator)`：唯一「不等待、允许返回空列表」的查询方法（见第 7 节问题三）
 - 超时统一抛 `WaitTimeoutError`，消息里带 locator、超时值、页面标题、当前 URL——失败时不用再猜是哪一步挂的
 - 超时/轮询/重试次数可由 `WAIT_TIMEOUT` / `WAIT_POLL` / `WAIT_STALE_RETRIES` 覆盖，无需改代码
 - `elements_now` 是唯一「不等待、允许返回空列表」的查询方法，专门服务「数量本身就是断言目标」的场景（如断言购物车为空）；其余方法都等到条件成立才返回
@@ -121,6 +123,8 @@ data/login_data.yaml        ← 外部测试数据
 **第 3 层 · Page Object** —— `pages/`
 
 一个页面一个类，只暴露业务语义方法（`login()`、`add_to_cart(name)`、`sort_by_price_low_high()`），locator 以类常量声明在类顶部。定位串统一用 `("id", "user-name")` 这种元组形式，与 Selenium 的 `By` 语义等价。
+
+`BasePage.open(url)` 对 Chrome 网络层瞬时错误（`ERR_CONNECTION_RESET` / `ERR_TIMED_OUT` 等）自动重试最多 3 次；其它 `WebDriverException` 原样抛出，避免掩盖真实故障。
 
 **第 4 层 · 用例层** —— `tests/`
 
@@ -498,6 +502,41 @@ if not os.getenv("GITHUB_ACTIONS"):
 **判据**：修复前后同一机器上单条用例的 `create_driver()` 耗时从分钟级降到秒级。
 
 **验证结果：已实测通过。** 修复后 `pytest -m "wait or action"` 全程 **43.02 秒**跑完 13 条（修复前一个用例就要三分钟）。
+
+### P7：CI 上「点击了但没反应」导致用例超时（已修）
+
+**症状**：CI 上随机出现这类失败，且每次挂的按钮不同：
+
+| 失败断言 | 现象 |
+|---|---|
+| 等 `remove-sauce-labs-bike-light` 可见 | 点「加入购物车」后按钮没变 |
+| 等 URL 含 `checkout-step-two.html` | 点「Continue」后页面没跳转 |
+| 等 URL 含 `checkout-step-one.html` | 点「Checkout」后页面没跳转 |
+| 等某行「元素不可见」 | 点「Remove」后商品行没消失 |
+
+**根因**：不是等得不够久（10s 早就过了），而是**那一次点击根本没生效**。CI runner 更慢，商品图片边加载边撑开布局，按钮会移位——原生点击按元素坐标派发，坐标漂了就会点到别处；另一种可能是 React 的事件监听尚未挂载，按钮「可见且启用」但点击无响应。这两点 `element_to_be_clickable` 都判断不出来（它只看可见+启用）。
+
+**修复**：在 [wait_utils.py](utils/wait_utils.py) 增加 `click_until(locator, waiter)`——点击后调用 `waiter()` 判断是否生效，没生效就重新点击（默认 3 次）：
+
+```python
+wait.click_until(BTN, lambda: wait.until_url_contains("checkout-step-two.html", timeout=4))
+wait.click_until(remove_btn, lambda: wait.invisible(row, timeout=4))
+```
+
+四个受害点（加购、Checkout、Continue、Finish、Remove）全部改为以**效果**为判据，Page 层不再各自写重试循环。同时补了两条自测：
+
+- `test_click_until_waits_for_effect`：生效后立即返回；
+- `test_click_until_retries_when_click_does_nothing`：`monkeypatch` 让第一次点击落空，断言它确实重试并最终成功。
+
+**经验**：这类「点了没反应」只能靠**效果**判断，靠加大 `timeout` 或 `launchWatchMs` 式的窗口调整都治不了——时间从不是矛盾的主要方面。
+
+**顺带修的另一类**：同一轮本地复跑还出现过
+
+```
+WebDriverException: unknown error: net::ERR_CONNECTION_RESET
+```
+
+这是**网络层**瞬时错误（saucedemo 在 GitHub Pages 上，国内链路偶发 RST），不是定位或等待问题。已在 [base_page.py](pages/base_page.py) 的 `open()` 里加网络错误重试（最多 3 次，只重试 `net::ERR_CONNECTION*` / `ERR_TIMED_OUT` / `ERR_NAME_NOT_RESOLVED` 等，其它异常照常抛出）。
 
 ---
 

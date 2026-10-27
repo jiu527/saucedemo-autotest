@@ -183,6 +183,39 @@ class WaitUtils:
             locator, self.clickable, lambda element: element.click(), timeout
         )
 
+    def click_until(self, locator, waiter, timeout=None, attempts=3):
+        """点击 locator，直到 `waiter()` 返回真值；未生效则重新点击。
+
+        CI 上多次出现过「点击落空」：按钮可见可点击，点下去却什么也没发生
+        （布局在图片加载时漂移、或 React 事件监听尚未挂载）。`clickable`
+        只看可见+启用，判断不出这类情况，所以这里以调用方给的 `waiter`
+        作为「生效」判据——通常是把本类另一个等待方法包一层 lambda：
+
+            wait.click_until(BTN, lambda: wait.until_url_contains("step-two.html"))
+            wait.click_until(BTN, lambda: wait.invisible(row))
+
+        `waiter` 抛 `WaitTimeoutError` 视为本次未生效并重试；重试耗尽后
+        抛出最后一次的异常（点击异常或等待超时）。
+        """
+        last_error = None
+        for _ in range(max(1, attempts)):
+            try:
+                self.click(locator, timeout)
+            except (TimeoutException, WebDriverException) as exc:
+                last_error = exc
+                continue
+            try:
+                if waiter():
+                    return
+            except (TimeoutException, WebDriverException) as exc:
+                last_error = exc
+        if last_error is not None:
+            raise last_error
+        url, title = self._page_info()
+        raise WaitTimeoutError(
+            locator, self.timeout if timeout is None else timeout, "点击生效", url, title
+        )
+
     def type_text(self, locator, text, clear=True, timeout=None):
         """等待元素可点击后输入文本，返回 None。
 

@@ -1,7 +1,4 @@
-from selenium.common.exceptions import WebDriverException
-
 from pages.base_page import BasePage
-from utils.wait_utils import WaitTimeoutError
 
 
 class CartPage(BasePage):
@@ -33,40 +30,24 @@ class CartPage(BasePage):
 
     def remove_item(self, name):
         slug = name.lower().replace(" ", "-")
-        self.wait.click(("css selector", f"[data-test='remove-{slug}']"))
-        # 等这一行真正消失
+        # 要等的那一行（用于判断「点了之后真的消失了」）
         row = ("xpath",
             f"//div[contains(@class,'cart_item')]"
             f"[.//div[contains(@class,'inventory_item_name') "
             f"and normalize-space()='{name}']]")
-        self.wait.invisible(row)
+        # 以「这一行真的消失」为判据重试点击（CI 上偶发点击落空）
+        self.wait.click_until(
+            ("css selector", f"[data-test='remove-{slug}']"),
+            lambda: self.wait.invisible(row, timeout=4),
+        )
 
     def checkout(self):
         """点击 Checkout，跳转到 checkout-step-one 页。
 
-        与 InventoryPage.add_to_cart 同理：以 URL 变化为成功判据，
-        点一次没跳转就再点（CI 上偶发，事件监听未就绪或布局漂移时点击无效）。
+        以 URL 变化为判据重试（CI 上偶发点击落空，详见 WaitUtils.click_until）。
         """
-        last_error = None
-        for attempt in range(1, 4):
-            try:
-                element = self.wait.clickable(self.CHECKOUT_BTN)
-                self.driver.execute_script(
-                    "arguments[0].scrollIntoView({block: 'center'});", element
-                )
-                if attempt == 2:
-                    self.driver.execute_script("arguments[0].click();", element)
-                else:
-                    element.click()
-            except WebDriverException as exc:
-                last_error = exc
-                continue
+        self.wait.click_until(
+            self.CHECKOUT_BTN,
+            lambda: self.wait.until_url_contains("checkout-step-one.html", timeout=4),
+        )
 
-            try:
-                self.wait.until_url_contains("checkout-step-one.html", timeout=4)
-                return
-            except WaitTimeoutError as exc:
-                last_error = exc
-                continue
-
-        raise last_error
