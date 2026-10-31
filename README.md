@@ -128,7 +128,16 @@ data/login_data.yaml        ← 外部测试数据
 
 **第 4 层 · 用例层** —— `tests/`
 
-只做三件事：调用页面对象、断言、挂 Allure 元数据（`epic` / `feature` / `story` / `title`）。跨用例的重复前置（已登录、已加购、已走到结账第一步）抽成各测试文件内的 `@pytest.fixture`，而不是互相 import 用例。
+只做三件事：调用页面对象、断言、挂 Allure 元数据（`epic` / `feature` / `story` / `title`）。重复前置按「有没有第二个消费者」分两层放置：
+
+| 前置 | 放哪 | 理由 |
+|---|---|---|
+| `driver` / `wait` / `inventory_page`（已用标准用户登录并进入库存页） | [conftest.py](conftest.py) | 被库存/购物车/结账三个测试文件共用 |
+| `cart_page`（已加两件商品进购物车）、`checkout_page`（已走到结账第一步） | 各自的测试文件内 | 只服务本文件的 2 条用例；「加哪两件商品」属于该文件的业务场景 |
+
+判据是「**跨文件重复的前置才上提 conftest，单文件业务前置留在文件里**」，而不是「能不能共享」。凭据与商品名等常量收在 [data/constants.py](data/constants.py)，避免在 4 处各写一份 `"standard_user" / "secret_sauce"`。
+
+> 该分层调整后已全量复跑确认无退化：`27 passed in 125.85s`。
 
 **横向支撑**
 

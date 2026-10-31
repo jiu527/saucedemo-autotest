@@ -1,28 +1,24 @@
 import allure
 import pytest
 
+from data.constants import ITEM_A, ITEM_B
 from pages.cart_page import CartPage
 from pages.checkout_page import CheckoutPage
-from pages.inventory_page import InventoryPage
-from pages.login_page import LoginPage
-
-ITEM_A = "Sauce Labs Backpack"
-ITEM_B = "Sauce Labs Bike Light"
 
 
 @pytest.fixture
-def checkout_page(driver):
-    """两件商品并走到结账第一步（填写信息页）"""
-    page = LoginPage(driver)
-    page.open()
-    page.login("standard_user", "secret_sauce")
-    inventory = InventoryPage(driver)
+def checkout_page(inventory_page):
+    """两件商品已在购物车，并已走到结账第一步（填写信息页）。
+
+    「登录进库存页」复用 conftest 的 inventory_page；本文件只保留自己的
+    业务前置（加哪两件、走到哪一步）。
+    """
     for name in (ITEM_A, ITEM_B):
-        inventory.add_to_cart(name)
-    cart = CartPage(driver)
+        inventory_page.add_to_cart(name)
+    cart = CartPage(inventory_page.driver)
     cart.open()
     cart.checkout()
-    return CheckoutPage(driver)
+    return CheckoutPage(inventory_page.driver)
 
 
 @allure.epic('电商API自动化测试')

@@ -1,24 +1,21 @@
 import allure
 import pytest
 
+from data.constants import ITEM_A, ITEM_B
 from pages.cart_page import CartPage
 from pages.checkout_page import CheckoutPage
-from pages.inventory_page import InventoryPage
-from pages.login_page import LoginPage
-
-ITEM_A = "Sauce Labs Backpack"    # 29.99
-ITEM_B = "Sauce Labs Bike Light"  # 9.99
 
 
 @pytest.fixture
-def cart_page(driver):
-    page = LoginPage(driver)
-    page.open()
-    page.login("standard_user", "secret_sauce")
-    inventory = InventoryPage(driver)
-    inventory.add_to_cart(ITEM_A)
-    inventory.add_to_cart(ITEM_B)
-    cart = CartPage(driver)
+def cart_page(inventory_page):
+    """两件商品已在购物车里。
+
+    fixture 只保留本文件自己的业务前置（加哪两件、进购物车）；
+    「登录并进入库存页」来自 conftest 的 inventory_page。
+    """
+    inventory_page.add_to_cart(ITEM_A)
+    inventory_page.add_to_cart(ITEM_B)
+    cart = CartPage(inventory_page.driver)
     cart.open()
     return cart
 

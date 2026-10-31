@@ -1,17 +1,7 @@
 import allure
 import pytest
 
-from pages.inventory_page import InventoryPage
-from pages.login_page import LoginPage
-
-
-@pytest.fixture
-def inventory_page(driver):
-    """已登录并进入库存页的页面对象，两条用例共享同一前置。"""
-    page = LoginPage(driver)
-    page.open()
-    page.login("standard_user", "secret_sauce")
-    return InventoryPage(driver)
+from data.constants import ITEM_A, ITEM_B
 
 
 @allure.epic('电商API自动化测试')
@@ -20,7 +10,7 @@ def inventory_page(driver):
 @allure.title('购物车角标与已添加商品数一致')
 @pytest.mark.inventory
 def test_add_to_cart_badge(inventory_page):
-    items = ["Sauce Labs Backpack", "Sauce Labs Bike Light"]
+    items = [ITEM_A, ITEM_B]
     for name in items:
         inventory_page.add_to_cart(name)
     assert inventory_page.get_cart_count() == len(items)
